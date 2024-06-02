@@ -41,12 +41,14 @@ fn default_resync_interval() -> Duration {
     Duration::from_secs_f32(2.5)
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
 struct SpotifyConfig {
     client_id: String,
     client_secret: String,
     #[serde(default = "default_redirect_uri")]
     redirect_uri: String,
+    #[serde_as(as = "DurationSeconds<f64>")]
     #[serde(default = "default_resync_interval")]
     resync_interval: Duration,
 }

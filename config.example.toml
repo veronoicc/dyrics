@@ -1,0 +1,8 @@
+[spotify]
+client_id = "Your spotify client id here"
+client_secret = "Your spotify client secret here"
+redirect_uri = "https://127.0.0.1" # OPTIONAL: Will use "https://127.0.0.1" if not specified
+resync_interval = 2.5 # OPTIONAL: Will use 2.5 if not specified
+
+[discord]
+token = "Your discord token here"
