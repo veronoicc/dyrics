@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-rspotify = { version = "0.13", features = ["client-reqwest", "reqwest-rustls-tls", "cli"] }
+rspotify = { version = "0.13", default-features = false, features = ["client-reqwest", "reqwest-rustls-tls", "cli"] }
 once_cell = "1.19"
 chrono = "0.4"
 figment = {version = "0.10", features = ["toml", "env"] }
