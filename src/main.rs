@@ -10,9 +10,7 @@ use figment::{
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use rspotify::{
-    clients::OAuthClient as _,
-    model::{AdditionalType, FullTrack, PlayableItem},
-    scopes, AuthCodeSpotify, Credentials, OAuth,
+    clients::OAuthClient as _, model::{AdditionalType, FullTrack, PlayableItem}, scopes, AuthCodeSpotify, Config as SpotifyClientConfig, Credentials, OAuth
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -57,16 +55,20 @@ struct SpotifyConfig {
 async fn main() -> eyre::Result<()> {
     let config = Figment::new()
         .merge(Toml::file("config.toml"))
-        .merge(Env::prefixed("CONFIG_"))
+        .merge(Env::prefixed("CONFIG_").split("_"))
         .extract::<Config>()?;
 
-    let spotify = AuthCodeSpotify::new(
+    let spotify = AuthCodeSpotify::with_config(
         Credentials::new(&config.spotify.client_id, &config.spotify.client_secret),
         OAuth {
             redirect_uri: config.spotify.redirect_uri,
             scopes: scopes!("user-read-currently-playing"),
             ..Default::default()
         },
+        SpotifyClientConfig {
+            token_cached: true,
+            ..Default::default()
+        }
     );
     spotify
         .prompt_for_token(&spotify.get_authorize_url(false).unwrap())
