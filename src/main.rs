@@ -50,7 +50,7 @@ struct SpotifyConfig {
     #[serde(default = "default_resync_interval")]
     resync_interval: Duration,
     #[serde(skip_serializing_if = "Option::is_none")]
-    redirected_url: Option<String>,
+    code: Option<String>,
 }
 
 #[tokio::main]
@@ -74,14 +74,9 @@ async fn main() -> eyre::Result<()> {
     );
 
     // Handle authentication
-    if let Some(redirected_url) = &config.spotify.redirected_url {
-        // Use provided redirect URL to extract code and request token
-        if let Some(code) = spotify.parse_response_code(redirected_url) {
-            spotify.request_token(&code).await.unwrap();
-            spotify.write_token_cache().await.unwrap();
-        } else {
-            return Err(eyre::eyre!("Failed to parse authorization code from redirected URL"));
-        }
+    if let Some(code) = &config.spotify.code {
+        spotify.request_token(&code).await.unwrap();
+        spotify.write_token_cache().await.unwrap();
     } else {
         // Prompt for token as before
         spotify
