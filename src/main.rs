@@ -10,7 +10,7 @@ use figment::{
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use rspotify::{
-    clients::OAuthClient as _, model::{AdditionalType, FullTrack, PlayableItem}, scopes, AuthCodeSpotify, Config as SpotifyClientConfig, Credentials, OAuth
+    clients::OAuthClient as _, model::{AdditionalType, FullTrack, PlayableItem}, prelude::BaseClient as _, scopes, AuthCodeSpotify, Config as SpotifyClientConfig, Credentials, OAuth
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -49,6 +49,8 @@ struct SpotifyConfig {
     #[serde_as(as = "DurationSeconds<f64>")]
     #[serde(default = "default_resync_interval")]
     resync_interval: Duration,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    redirected_url: Option<String>,
 }
 
 #[tokio::main]
@@ -61,7 +63,7 @@ async fn main() -> eyre::Result<()> {
     let spotify = AuthCodeSpotify::with_config(
         Credentials::new(&config.spotify.client_id, &config.spotify.client_secret),
         OAuth {
-            redirect_uri: config.spotify.redirect_uri,
+            redirect_uri: config.spotify.redirect_uri.clone(),
             scopes: scopes!("user-read-currently-playing"),
             ..Default::default()
         },
@@ -70,10 +72,23 @@ async fn main() -> eyre::Result<()> {
             ..Default::default()
         }
     );
-    spotify
-        .prompt_for_token(&spotify.get_authorize_url(false).unwrap())
-        .await
-        .unwrap();
+
+    // Handle authentication
+    if let Some(redirected_url) = &config.spotify.redirected_url {
+        // Use provided redirect URL to extract code and request token
+        if let Some(code) = spotify.parse_response_code(redirected_url) {
+            spotify.request_token(&code).await.unwrap();
+            spotify.write_token_cache().await.unwrap();
+        } else {
+            return Err(eyre::eyre!("Failed to parse authorization code from redirected URL"));
+        }
+    } else {
+        // Prompt for token as before
+        spotify
+            .prompt_for_token(&spotify.get_authorize_url(false).unwrap())
+            .await
+            .unwrap();
+    }
 
     let current_lyrics = Arc::new(RwLock::new(Option::None));
 
