@@ -60,7 +60,7 @@ async fn main() -> eyre::Result<()> {
         .merge(Env::prefixed("CONFIG_").split("_"))
         .extract::<Config>()?;
 
-    let spotify = AuthCodeSpotify::with_config(
+    let mut spotify = AuthCodeSpotify::with_config(
         Credentials::new(&config.spotify.client_id, &config.spotify.client_secret),
         OAuth {
             redirect_uri: config.spotify.redirect_uri.clone(),
@@ -75,6 +75,8 @@ async fn main() -> eyre::Result<()> {
 
     // Handle authentication
     if let Some(code) = &config.spotify.code {
+        let (state, code) = code.split_once(':').expect("Failed to split code");
+        spotify.oauth.state = state.to_string();
         spotify.request_token(&code).await.unwrap();
         spotify.write_token_cache().await.unwrap();
     } else {
