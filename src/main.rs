@@ -20,6 +20,9 @@ use tokio::sync::RwLock;
 
 static DISCORD_REQWEST: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::new());
 
+// Smoothing factor for exponential moving average (0.0 = no change, 1.0 = replace completely)
+const DISCORD_OFFSET_SMOOTHING: f64 = 0.2;
+
 #[derive(Debug, Clone, Deserialize)]
 struct Config {
     discord: DiscordConfig,
@@ -313,26 +316,50 @@ async fn status_loop(
                 if last_text_loc != &text {
                     if let Ok(request_duration) = set_discord_status(&text, "🎶", token).await {
                         // Calculate offset as half the request duration (one-way latency estimate)
-                        // Cap the offset to reasonable bounds (10ms to 2000ms)
-                        let raw_offset = request_duration / 2;
-                        let new_offset = raw_offset.clamp(Duration::from_millis(10), Duration::from_millis(2000));
+                        // Cap the raw measurement to reasonable bounds (10ms to 2000ms)
+                        let raw_measurement = request_duration / 2;
+                        let clamped_measurement = raw_measurement.clamp(Duration::from_millis(10), Duration::from_millis(2000));
+                        
                         let old_offset = *discord_offset.read().await;
+                        let new_offset = if old_offset.is_zero() {
+                            // First measurement, use it directly
+                            clamped_measurement
+                        } else {
+                            // Exponential moving average: α * new + (1 - α) * old
+                            let old_ms = old_offset.as_millis() as f64;
+                            let new_ms = clamped_measurement.as_millis() as f64;
+                            let averaged_ms = DISCORD_OFFSET_SMOOTHING * new_ms + (1.0 - DISCORD_OFFSET_SMOOTHING) * old_ms;
+                            Duration::from_millis(averaged_ms as u64)
+                        };
+                        
                         *discord_offset.write().await = new_offset;
-                        println!("New text is: {} | Discord offset updated: {}ms -> {}ms", 
-                                text, old_offset.as_millis(), new_offset.as_millis());
+                        println!("New text: \"{}\" | Raw: {}ms, Moving avg: {}ms -> {}ms", 
+                                text, clamped_measurement.as_millis(), old_offset.as_millis(), new_offset.as_millis());
                     }
                     last_text = Some(text);
                 }
             } else {
                 if let Ok(request_duration) = set_discord_status(&text, "🎶", token).await {
                     // Calculate offset as half the request duration (one-way latency estimate)
-                    // Cap the offset to reasonable bounds (10ms to 2000ms)
-                    let raw_offset = request_duration / 2;
-                    let new_offset = raw_offset.clamp(Duration::from_millis(10), Duration::from_millis(2000));
+                    // Cap the raw measurement to reasonable bounds (10ms to 2000ms)
+                    let raw_measurement = request_duration / 2;
+                    let clamped_measurement = raw_measurement.clamp(Duration::from_millis(10), Duration::from_millis(2000));
+                    
                     let old_offset = *discord_offset.read().await;
+                    let new_offset = if old_offset.is_zero() {
+                        // First measurement, use it directly
+                        clamped_measurement
+                    } else {
+                        // Exponential moving average: α * new + (1 - α) * old
+                        let old_ms = old_offset.as_millis() as f64;
+                        let new_ms = clamped_measurement.as_millis() as f64;
+                        let averaged_ms = DISCORD_OFFSET_SMOOTHING * new_ms + (1.0 - DISCORD_OFFSET_SMOOTHING) * old_ms;
+                        Duration::from_millis(averaged_ms as u64)
+                    };
+                    
                     *discord_offset.write().await = new_offset;
-                    println!("New text is: {} | Discord offset updated: {}ms -> {}ms", 
-                            text, old_offset.as_millis(), new_offset.as_millis());
+                    println!("New text: \"{}\" | Raw: {}ms, Moving avg: {}ms -> {}ms", 
+                            text, clamped_measurement.as_millis(), old_offset.as_millis(), new_offset.as_millis());
                 }
                 last_text = Some(text);
             }
@@ -340,13 +367,25 @@ async fn status_loop(
             if last_text.is_some() {
                 if let Ok(request_duration) = set_discord_status("", "", token).await {
                     // Calculate offset as half the request duration (one-way latency estimate)
-                    // Cap the offset to reasonable bounds (10ms to 2000ms)
-                    let raw_offset = request_duration / 2;
-                    let new_offset = raw_offset.clamp(Duration::from_millis(10), Duration::from_millis(2000));
+                    // Cap the raw measurement to reasonable bounds (10ms to 2000ms)
+                    let raw_measurement = request_duration / 2;
+                    let clamped_measurement = raw_measurement.clamp(Duration::from_millis(10), Duration::from_millis(2000));
+                    
                     let old_offset = *discord_offset.read().await;
+                    let new_offset = if old_offset.is_zero() {
+                        // First measurement, use it directly
+                        clamped_measurement
+                    } else {
+                        // Exponential moving average: α * new + (1 - α) * old
+                        let old_ms = old_offset.as_millis() as f64;
+                        let new_ms = clamped_measurement.as_millis() as f64;
+                        let averaged_ms = DISCORD_OFFSET_SMOOTHING * new_ms + (1.0 - DISCORD_OFFSET_SMOOTHING) * old_ms;
+                        Duration::from_millis(averaged_ms as u64)
+                    };
+                    
                     *discord_offset.write().await = new_offset;
-                    println!("Cleared Discord status | Discord offset updated: {}ms -> {}ms", 
-                            old_offset.as_millis(), new_offset.as_millis());
+                    println!("Cleared Discord status | Raw: {}ms, Moving avg: {}ms -> {}ms", 
+                            clamped_measurement.as_millis(), old_offset.as_millis(), new_offset.as_millis());
                 }
                 last_text = None;
             }
