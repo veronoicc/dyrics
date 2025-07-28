@@ -313,7 +313,9 @@ async fn status_loop(
                 if last_text_loc != &text {
                     if let Ok(request_duration) = set_discord_status(&text, "🎶", token).await {
                         // Calculate offset as half the request duration (one-way latency estimate)
-                        let new_offset = request_duration / 2;
+                        // Cap the offset to reasonable bounds (10ms to 2000ms)
+                        let raw_offset = request_duration / 2;
+                        let new_offset = raw_offset.clamp(Duration::from_millis(10), Duration::from_millis(2000));
                         let old_offset = *discord_offset.read().await;
                         *discord_offset.write().await = new_offset;
                         println!("New text is: {} | Discord offset updated: {}ms -> {}ms", 
@@ -324,7 +326,9 @@ async fn status_loop(
             } else {
                 if let Ok(request_duration) = set_discord_status(&text, "🎶", token).await {
                     // Calculate offset as half the request duration (one-way latency estimate)
-                    let new_offset = request_duration / 2;
+                    // Cap the offset to reasonable bounds (10ms to 2000ms)
+                    let raw_offset = request_duration / 2;
+                    let new_offset = raw_offset.clamp(Duration::from_millis(10), Duration::from_millis(2000));
                     let old_offset = *discord_offset.read().await;
                     *discord_offset.write().await = new_offset;
                     println!("New text is: {} | Discord offset updated: {}ms -> {}ms", 
@@ -336,7 +340,9 @@ async fn status_loop(
             if last_text.is_some() {
                 if let Ok(request_duration) = set_discord_status("", "", token).await {
                     // Calculate offset as half the request duration (one-way latency estimate)
-                    let new_offset = request_duration / 2;
+                    // Cap the offset to reasonable bounds (10ms to 2000ms)
+                    let raw_offset = request_duration / 2;
+                    let new_offset = raw_offset.clamp(Duration::from_millis(10), Duration::from_millis(2000));
                     let old_offset = *discord_offset.read().await;
                     *discord_offset.write().await = new_offset;
                     println!("Cleared Discord status | Discord offset updated: {}ms -> {}ms", 
