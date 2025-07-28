@@ -1,6 +1,6 @@
 use std::{
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use figment::{
@@ -88,6 +88,7 @@ async fn main() -> eyre::Result<()> {
     }
 
     let current_lyrics = Arc::new(RwLock::new(Option::None));
+    let discord_offset = Arc::new(RwLock::new(Duration::from_millis(0)));
 
     tokio::spawn(step_loop(current_lyrics.clone()));
 
@@ -97,7 +98,7 @@ async fn main() -> eyre::Result<()> {
             spotify,
             config.spotify.resync_interval
         ),
-        status_loop(current_lyrics.clone(), &config.discord.token),
+        status_loop(current_lyrics.clone(), discord_offset.clone(), &config.discord.token),
     )?;
 
     Ok(())
@@ -260,16 +261,21 @@ async fn resync_loop(
 
 async fn status_loop(
     current_lyrics: Arc<RwLock<Option<(Option<Lyrics>, FullTrack, Duration)>>>,
+    discord_offset: Arc<RwLock<Duration>>,
     token: &str,
 ) -> eyre::Result<()> {
     let mut last_text = None;
 
     loop {
         if let Some((current_lyrics, track, current_time)) = current_lyrics.read().await.clone() {
+            // Apply the Discord offset to compensate for request latency
+            let discord_offset_duration = *discord_offset.read().await;
+            let adjusted_time = current_time + discord_offset_duration;
+            
             let text = if let Some(lyrics) = current_lyrics {
                 match lyrics.content {
                     LyricsContent::Syllable(syllables) => {
-                        let syllable = syllable_find_nearest(&syllables, current_time);
+                        let syllable = syllable_find_nearest(&syllables, adjusted_time);
 
                         if let Some(syllable) = syllable {
                             syllable
@@ -284,7 +290,7 @@ async fn status_loop(
                         }
                     }
                     LyricsContent::Line(lines) => {
-                        let line = line_find_nearest(&lines, current_time);
+                        let line = line_find_nearest(&lines, adjusted_time);
 
                         line.map(|val| val.text.to_string())
                             .unwrap_or("".to_string())
@@ -305,18 +311,37 @@ async fn status_loop(
 
             if let Some(ref last_text_loc) = last_text {
                 if last_text_loc != &text {
-                    set_discord_status(&text, "🎶", token).await?;
-                    println!("New text is: {}", text);
+                    if let Ok(request_duration) = set_discord_status(&text, "🎶", token).await {
+                        // Calculate offset as half the request duration (one-way latency estimate)
+                        let new_offset = request_duration / 2;
+                        let old_offset = *discord_offset.read().await;
+                        *discord_offset.write().await = new_offset;
+                        println!("New text is: {} | Discord offset updated: {}ms -> {}ms", 
+                                text, old_offset.as_millis(), new_offset.as_millis());
+                    }
                     last_text = Some(text);
                 }
             } else {
-                set_discord_status(&text, "🎶", token).await?;
-                println!("New text is: {}", text);
+                if let Ok(request_duration) = set_discord_status(&text, "🎶", token).await {
+                    // Calculate offset as half the request duration (one-way latency estimate)
+                    let new_offset = request_duration / 2;
+                    let old_offset = *discord_offset.read().await;
+                    *discord_offset.write().await = new_offset;
+                    println!("New text is: {} | Discord offset updated: {}ms -> {}ms", 
+                            text, old_offset.as_millis(), new_offset.as_millis());
+                }
                 last_text = Some(text);
             }
         } else {
             if last_text.is_some() {
-                set_discord_status("", "", token).await?;
+                if let Ok(request_duration) = set_discord_status("", "", token).await {
+                    // Calculate offset as half the request duration (one-way latency estimate)
+                    let new_offset = request_duration / 2;
+                    let old_offset = *discord_offset.read().await;
+                    *discord_offset.write().await = new_offset;
+                    println!("Cleared Discord status | Discord offset updated: {}ms -> {}ms", 
+                            old_offset.as_millis(), new_offset.as_millis());
+                }
                 last_text = None;
             }
         }
@@ -378,7 +403,9 @@ fn line_find_nearest<'a>(
     })
 }
 
-async fn set_discord_status(text: &str, emoji: &str, token: &str) -> eyre::Result<()> {
+async fn set_discord_status(text: &str, emoji: &str, token: &str) -> eyre::Result<Duration> {
+    let start_time = Instant::now();
+    
     DISCORD_REQWEST
         .patch("https://discord.com/api/v6/users/@me/settings")
         .header("authorization", token)
@@ -391,5 +418,6 @@ async fn set_discord_status(text: &str, emoji: &str, token: &str) -> eyre::Resul
         .send()
         .await?;
 
-    Ok(())
+    let request_duration = start_time.elapsed();
+    Ok(request_duration)
 }
