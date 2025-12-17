@@ -1,2 +1,3 @@
 /target
 config.toml
+.spotify_token_cache.json
