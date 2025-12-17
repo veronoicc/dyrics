@@ -100,12 +100,15 @@ impl Lyrics {
         match &self.content {
             LyricsContent::Syllable(syllables) => {
                 find_nearest_syllable_line(syllables, timestamp).map(|line| {
-                    line.lead
-                        .syllables
-                        .iter()
-                        .map(|s| s.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join("")
+                    let mut result = String::new();
+                    for syllable in &line.lead.syllables {
+                        // Add space before syllable if it's not part of the previous word
+                        if !result.is_empty() && !syllable.is_part_of_word {
+                            result.push(' ');
+                        }
+                        result.push_str(&syllable.text);
+                    }
+                    result
                 })
             }
             LyricsContent::Line(lines) => {
@@ -162,16 +165,19 @@ impl Lyrics {
         match &self.content {
             LyricsContent::Syllable(syllables) => syllables
                 .iter()
-                .map(|line| TimedLine {
-                    text: line
-                        .lead
-                        .syllables
-                        .iter()
-                        .map(|s| s.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join(""),
-                    start_time: line.lead.start_time,
-                    end_time: line.lead.end_time,
+                .map(|line| {
+                    let mut text = String::new();
+                    for syllable in &line.lead.syllables {
+                        if !text.is_empty() && !syllable.is_part_of_word {
+                            text.push(' ');
+                        }
+                        text.push_str(&syllable.text);
+                    }
+                    TimedLine {
+                        text,
+                        start_time: line.lead.start_time,
+                        end_time: line.lead.end_time,
+                    }
                 })
                 .collect(),
             LyricsContent::Line(lines) => lines
