@@ -209,6 +209,16 @@ impl RateLimiter {
                 i = batch_end;
             }
         }
+
+        // Add a clear status update after the last lyric ends
+        if let Some(last_line) = upcoming.last() {
+            // Schedule clear slightly after the last line ends
+            let clear_time = last_line.end_time + Duration::from_millis(100);
+            self.schedule.push_back(ScheduledUpdate {
+                display_time: clear_time,
+                text: String::new(), // Empty = clear status
+            });
+        }
     }
 
     /// Get the next scheduled update if it's time to display it.
@@ -226,9 +236,10 @@ impl RateLimiter {
     }
 
     /// Send a status update to Discord if we have capacity.
+    /// Empty text clears the status.
     pub async fn send_update(&mut self, text: &str, emoji: &str, token: &str) -> Result<bool> {
         // Skip if same as last sent
-        if self.last_sent.as_ref() == Some(&text.to_string()) {
+        if self.last_sent.as_deref() == Some(text) {
             return Ok(false);
         }
 
@@ -236,16 +247,30 @@ impl RateLimiter {
             return Ok(false);
         }
 
-        let request_duration = self.send_status(text, emoji, token).await?;
+        // Empty text means clear status
+        let (actual_text, actual_emoji) = if text.is_empty() {
+            ("", "")
+        } else {
+            (text, emoji)
+        };
+
+        let request_duration = self.send_status(actual_text, actual_emoji, token).await?;
         self.update_latency(request_duration);
         self.timestamps.push_back(Instant::now());
         self.last_sent = Some(text.to_string());
 
-        println!(
-            "Discord status: \"{}\" | Latency: {}ms",
-            text,
-            self.latency_estimate.as_millis()
-        );
+        if text.is_empty() {
+            println!(
+                "Discord status cleared | Latency: {}ms",
+                self.latency_estimate.as_millis()
+            );
+        } else {
+            println!(
+                "Discord status: \"{}\" | Latency: {}ms",
+                text,
+                self.latency_estimate.as_millis()
+            );
+        }
 
         Ok(true)
     }
