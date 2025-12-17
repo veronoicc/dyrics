@@ -24,14 +24,35 @@ const RATE_LIMIT_MAX_UPDATES: usize = 3;
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(10);
 /// Minimum interval between updates (window / max_updates).
 const MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(3334); // 10s / 3
-/// Separator used when batching multiple lines together.
-const BATCH_SEPARATOR: &str = ". ";
+/// Characters that count as ending punctuation (no dot needed after these).
+const END_PUNCTUATION: &[char] = &['.', '!', '?', ':', ';', '…'];
+/// Default separator when line doesn't end with punctuation.
+const DEFAULT_SEPARATOR: &str = ". ";
 /// Smoothing factor for latency estimation (0.0 = no change, 1.0 = replace completely).
 const LATENCY_SMOOTHING: f64 = 0.2;
 /// Minimum latency clamp (ms).
 const MIN_LATENCY_MS: u64 = 10;
 /// Maximum latency clamp (ms).
 const MAX_LATENCY_MS: u64 = 2000;
+/// Maximum Discord status text length.
+const MAX_STATUS_LENGTH: usize = 255;
+
+/// Join lines with smart separators (space if line ends with punctuation, ". " otherwise).
+fn smart_join(lines: &[&str]) -> String {
+    let mut result = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            // Check if previous content ends with punctuation
+            if result.ends_with(END_PUNCTUATION) {
+                result.push(' ');
+            } else {
+                result.push_str(DEFAULT_SEPARATOR);
+            }
+        }
+        result.push_str(line);
+    }
+    result
+}
 
 /// A scheduled status update.
 #[derive(Debug, Clone)]
@@ -114,14 +135,14 @@ impl RateLimiter {
     ///
     /// This looks at upcoming lyrics and determines which lines need to be
     /// batched together to respect the rate limit while showing everything
-    /// at the correct time.
+    /// at the correct time. Lines exceeding 255 characters are skipped.
     pub fn build_schedule(&mut self, lines: &[TimedLine], current_position: Duration) {
         self.schedule.clear();
 
-        // Filter to lines that haven't ended yet, sorted by start time
+        // Filter to lines that haven't ended yet and aren't too long, sorted by start time
         let mut upcoming: Vec<_> = lines
             .iter()
-            .filter(|l| l.end_time > current_position)
+            .filter(|l| l.end_time > current_position && l.text.len() <= MAX_STATUS_LENGTH)
             .collect();
         upcoming.sort_by_key(|l| l.start_time);
 
@@ -159,22 +180,30 @@ impl RateLimiter {
 
                 // Merge these lines into the previous scheduled update
                 if let Some(prev) = self.schedule.back_mut() {
-                    let additional: Vec<_> = upcoming[batch_start..batch_end]
-                        .iter()
-                        .map(|l| l.text.as_str())
-                        .collect();
-                    prev.text = format!("{}{}{}", prev.text, BATCH_SEPARATOR, additional.join(BATCH_SEPARATOR));
+                    let mut all_lines: Vec<&str> = vec![prev.text.as_str()];
+                    all_lines.extend(upcoming[batch_start..batch_end].iter().map(|l| l.text.as_str()));
+                    let new_text = smart_join(&all_lines);
+                    
+                    // Only merge if result doesn't exceed limit, otherwise skip these lines
+                    if new_text.len() <= MAX_STATUS_LENGTH {
+                        prev.text = new_text;
+                    }
                 } else {
                     // No previous update - create one with all batched lines
                     let texts: Vec<_> = upcoming[batch_start..batch_end]
                         .iter()
                         .map(|l| l.text.as_str())
                         .collect();
-                    self.schedule.push_back(ScheduledUpdate {
-                        display_time: line.start_time,
-                        text: texts.join(BATCH_SEPARATOR),
-                    });
-                    next_available = line.start_time + MIN_UPDATE_INTERVAL;
+                    let batched = smart_join(&texts);
+                    
+                    // Only add if within limit
+                    if batched.len() <= MAX_STATUS_LENGTH {
+                        self.schedule.push_back(ScheduledUpdate {
+                            display_time: line.start_time,
+                            text: batched,
+                        });
+                        next_available = line.start_time + MIN_UPDATE_INTERVAL;
+                    }
                 }
 
                 i = batch_end;
